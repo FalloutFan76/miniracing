@@ -1,424 +1,375 @@
-
 "use strict";
 
-// 1. CONFIGURACIÓN
-// Pondremos aquí la URL real del servidor cuando lo publiquemos.
 const SERVER_URL = "https://mini-racing-server-fa83.onrender.com";
-
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 ctx.imageSmoothingEnabled = false;
 
-const statusText = document.getElementById("connectionStatus");
-const statusDot = document.getElementById("statusDot");
-const message = document.getElementById("gameMessage");
-const joinButton = document.getElementById("joinButton");
-const nameInput = document.getElementById("playerName");
-const overlay = document.getElementById("gameOverlay");
-const playerCount = document.getElementById("playerCount");
-const lapDisplay = document.getElementById("lapDisplay");
-const positionDisplay = document.getElementById("positionDisplay");
-const leaderboard = document.getElementById("leaderboardList");
+const $ = (id) => document.getElementById(id);
+const socket = io(SERVER_URL, { transports: ["websocket", "polling"], reconnection: true });
 
-document.getElementById("year").textContent = new Date().getFullYear();
+const W = 960, H = 640;
+const CX = 480, CY = 320;
+const OUT_RX = 365, OUT_RY = 270;
+const IN_RX = 205, IN_RY = 120;
+const ROAD_RX = 285, ROAD_RY = 195;
 
-// 2. ESTADO DEL JUEGO
-const W = canvas.width;
-const H = canvas.height;
-
-let socket = null;
-let connected = false;
-let joined = false;
 let myId = null;
+let joined = false;
 let players = [];
-let raceMessage = "";
-let lastSent = 0;
+let myPlayer = null;
+let startedAt = 0;
+let raceStart = 0;
+let finished = false;
+let lastStateTime = performance.now();
+let toastTimer = null;
+let lastBoostSent = false;
+let lastFrame = performance.now();
+let particles = [];
+let cameraShake = 0;
+let input = { up:false, down:false, left:false, right:false, boost:false };
+const keys = new Set();
 
-const keys = {
-  up: false,
-  down: false,
-  left: false,
-  right: false
-};
+function showToast(message) {
+  $("toast").textContent = message;
+  $("toast").classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $("toast").classList.add("hidden"), 2400);
+}
 
-const COLORS = [
-  "#ff4e45", "#40d9ff", "#ffe05a", "#c68aff",
-  "#63f58a", "#ff9f43", "#f4f5f7", "#ff72b6"
-];
+socket.on("connect", () => {
+  $("connectionDot").className = "dot online";
+  $("connectionText").textContent = "Servidor conectado";
+  if (joined) sendJoin();
+});
+socket.on("disconnect", () => {
+  $("connectionDot").className = "dot offline";
+  $("connectionText").textContent = "Reconectando...";
+  showToast("Conexión perdida. Intentando volver...");
+});
+socket.on("connect_error", () => {
+  $("connectionDot").className = "dot offline";
+  $("connectionText").textContent = "Sin conexión";
+});
+socket.on("welcome", data => { myId = data.id; });
+socket.on("raceMessage", message => showToast(String(message)));
+socket.on("raceStarted", data => {
+  raceStart = data.startAt || Date.now();
+  finished = false;
+  $("raceStatus").textContent = "EN CARRERA";
+  showToast("¡A correr! ⚡");
+});
+socket.on("raceFinished", data => {
+  if (data.id === myId) {
+    finished = true;
+    $("overlayTitle").textContent = data.position === 1 ? "¡VICTORIA!" : "¡CARRERA TERMINADA!";
+    $("overlayText").textContent = `Has terminado en la posición ${data.position}.`;
+    $("joinButton").textContent = "VOLVER A CORRER";
+    $("overlay").classList.remove("hidden");
+  }
+});
+socket.on("state", data => {
+  if (!data || !Array.isArray(data.players)) return;
+  players = data.players;
+  myPlayer = players.find(p => p.id === myId) || null;
+  lastStateTime = performance.now();
+  updateLeaderboard();
+  updateHUD();
+});
 
-// 3. CIRCUITO TOP-DOWN
-// La pista es un óvalo con bordes pixelados.
-const track = {
-  cx: 480,
-  cy: 320,
-  outerRx: 365,
-  outerRy: 270,
-  innerRx: 205,
-  innerRy: 120
-};
+function sendJoin() {
+  if (!socket.connected) {
+    showToast("El servidor está arrancando. Espera unos segundos...");
+    return;
+  }
+  const name = $("playerName").value.trim().slice(0,16) || "Piloto";
+  socket.emit("joinRace", { name });
+}
+
+function joinGame() {
+  if (joined && !finished) return;
+  joined = true;
+  finished = false;
+  $("joinButton").disabled = true;
+  $("joinButton").textContent = "CONECTANDO...";
+  sendJoin();
+  if (socket.connected) {
+    $("overlay").classList.add("hidden");
+    $("joinButton").disabled = false;
+    $("joinButton").textContent = "ENTRAR EN CARRERA";
+    startedAt = performance.now();
+  } else {
+    $("overlayTitle").textContent = "Conectando...";
+    $("overlayText").textContent = "El servidor gratuito puede tardar unos segundos en arrancar.";
+    setTimeout(() => {
+      if (socket.connected && joined) {
+        $("overlay").classList.add("hidden");
+        $("joinButton").disabled = false;
+      }
+    }, 1800);
+  }
+}
+$("joinButton").addEventListener("click", joinGame);
+$("rejoinButton").addEventListener("click", () => {
+  joined = false;
+  finished = false;
+  $("overlayTitle").textContent = "¡A la parrilla!";
+  $("overlayText").textContent = "Entra en la carrera y compite contra tus amigos.";
+  $("joinButton").textContent = "ENTRAR EN CARRERA";
+  $("overlay").classList.remove("hidden");
+});
+$("playerName").addEventListener("keydown", e => { if (e.key === "Enter") joinGame(); });
+
+function updateKeys() {
+  input.up = keys.has("w") || keys.has("arrowup");
+  input.down = keys.has("s") || keys.has("arrowdown");
+  input.left = keys.has("a") || keys.has("arrowleft");
+  input.right = keys.has("d") || keys.has("arrowright");
+  input.boost = keys.has(" ");
+}
+window.addEventListener("keydown", e => {
+  const key = e.key.toLowerCase();
+  if (["arrowup","arrowdown","arrowleft","arrowright"," "].includes(key)) e.preventDefault();
+  keys.add(key);
+  updateKeys();
+});
+window.addEventListener("keyup", e => { keys.delete(e.key.toLowerCase()); updateKeys(); });
+window.addEventListener("blur", () => { keys.clear(); updateKeys(); });
+
+document.querySelectorAll("[data-control]").forEach(button => {
+  const control = button.dataset.control;
+  const down = e => {
+    e.preventDefault();
+    button.classList.add("active");
+    input[control] = true;
+    try { button.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+  const up = e => {
+    e.preventDefault();
+    button.classList.remove("active");
+    input[control] = false;
+  };
+  button.addEventListener("pointerdown", down);
+  button.addEventListener("pointerup", up);
+  button.addEventListener("pointercancel", up);
+  button.addEventListener("lostpointercapture", up);
+  button.addEventListener("contextmenu", e => e.preventDefault());
+});
+
+setInterval(() => {
+  if (socket.connected && joined && myPlayer && !finished) {
+    socket.emit("input", input);
+  }
+}, 33);
+
+function updateHUD() {
+  $("playerCount").textContent = `${players.length} piloto${players.length === 1 ? "" : "s"} conectado${players.length === 1 ? "" : "s"}`;
+  if (!myPlayer) return;
+  const position = players.slice().sort(comparePlayers).findIndex(p => p.id === myId) + 1;
+  $("positionDisplay").textContent = position > 0 ? `${position}º` : "—";
+  $("lapDisplay").textContent = `${Math.min(3, myPlayer.lap + 1)} / 3`;
+  $("speedDisplay").textContent = Math.round((myPlayer.speed || 0) * 34);
+  if (myPlayer.finished) $("raceStatus").textContent = "META";
+  else if (myPlayer.lap > 0) $("raceStatus").textContent = "EN CARRERA";
+}
+
+function comparePlayers(a, b) {
+  if (a.finished !== b.finished) return a.finished ? -1 : 1;
+  if (a.finished && b.finished) return (a.finishTime || 0) - (b.finishTime || 0);
+  return (b.lap * 10000 + (b.progress || 0) * 10000) -
+         (a.lap * 10000 + (a.progress || 0) * 10000);
+}
+function updateLeaderboard() {
+  const list = $("leaderboard");
+  list.innerHTML = "";
+  players.slice().sort(comparePlayers).forEach((p, i) => {
+    const li = document.createElement("li");
+    const rank = document.createElement("span");
+    rank.className = "rank";
+    rank.textContent = String(i + 1).padStart(2, "0");
+    const swatch = document.createElement("span");
+    swatch.className = "car-swatch";
+    swatch.style.background = p.color || "#fff";
+    const name = document.createElement("span");
+    name.className = "racer-name";
+    name.textContent = p.name + (p.id === myId ? " (TÚ)" : "");
+    const score = document.createElement("span");
+    score.className = "racer-score";
+    score.textContent = p.finished ? "META" : `${Math.min(3,p.lap + 1)}/3`;
+    li.append(rank, swatch, name, score);
+    list.appendChild(li);
+  });
+  if (!players.length) {
+    const li = document.createElement("li");
+    li.className = "empty-leaderboard";
+    li.textContent = "Esperando pilotos...";
+    list.appendChild(li);
+  }
+}
 
 function ellipsePath(rx, ry) {
   ctx.beginPath();
-  ctx.ellipse(track.cx, track.cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.ellipse(CX, CY, rx, ry, 0, 0, Math.PI * 2);
 }
-
+function drawGrass() {
+  ctx.fillStyle = "#204b35";
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = "#28583b";
+  for (let y=0; y<H; y+=32) {
+    for (let x=0; x<W; x+=32) {
+      if (((x/32|0)+(y/32|0))%2===0) ctx.fillRect(x,y,16,16);
+    }
+  }
+  for (let i=0; i<85; i++) {
+    const x=(i*137+23)%W, y=(i*83+17)%H;
+    ctx.fillStyle=i%2?"#326444":"#183f2d";
+    ctx.fillRect(x,y,4,4);
+  }
+}
 function drawTrack() {
-  // Césped
-  ctx.fillStyle = "#287a3d";
-  ctx.fillRect(0, 0, W, H);
-
-  // Patrón pixelado en el césped
-  for (let y = 10; y < H; y += 28) {
-    for (let x = 10; x < W; x += 28) {
-      if ((Math.floor(x / 28) + Math.floor(y / 28)) % 2 === 0) {
-        ctx.fillStyle = "#308747";
-        ctx.fillRect(x, y, 12, 12);
-      }
-    }
-  }
-
-  // Exterior de la pista
-  ctx.fillStyle = "#f2eee0";
-  ellipsePath(track.outerRx + 12, track.outerRy + 12);
-  ctx.fill();
-
-  // Bordillo rojo
-  ctx.fillStyle = "#e94843";
-  ellipsePath(track.outerRx + 5, track.outerRy + 5);
-  ctx.fill();
-
-  // Asfalto
-  ctx.fillStyle = "#454d58";
-  ellipsePath(track.outerRx - 8, track.outerRy - 8);
-  ctx.fill();
-
-  // Interior del circuito
-  ctx.fillStyle = "#f2eee0";
-  ellipsePath(track.innerRx + 9, track.innerRy + 9);
-  ctx.fill();
-
-  ctx.fillStyle = "#e94843";
-  ellipsePath(track.innerRx + 3, track.innerRy + 3);
-  ctx.fill();
-
-  ctx.fillStyle = "#287a3d";
-  ellipsePath(track.innerRx - 7, track.innerRy - 7);
-  ctx.fill();
-
-  // Línea discontinua de la trayectoria
-  ctx.strokeStyle = "#f8e9a4";
-  ctx.lineWidth = 3;
-  ctx.setLineDash([16, 17]);
-  ellipsePath(
-    (track.outerRx + track.innerRx) / 2,
-    (track.outerRy + track.innerRy) / 2
-  );
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Línea de salida
-  drawFinishLine(480 + track.outerRx * 0.01, 0);
-}
-
-function drawFinishLine() {
-  const x = track.cx;
-  const y = track.cy - track.outerRy + 18;
-  const size = 10;
-
-  for (let row = 0; row < 4; row++) {
-    for (let col = 0; col < 7; col++) {
-      ctx.fillStyle = (row + col) % 2 === 0 ? "#fff" : "#111820";
-      ctx.fillRect(x - 35 + col * size, y + row * size, size, size);
-    }
-  }
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 13px monospace";
-  ctx.textAlign = "center";
-  ctx.fillText("START", x, y + 58);
-}
-
-// 4. COCHES PIXEL ART
-function drawCar(player, isMe) {
-  const x = player.x;
-  const y = player.y;
-  const angle = player.angle || 0;
-  const color = player.color || COLORS[0];
-
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(angle);
-
-  // Sombra
-  ctx.fillStyle = "#14201c";
-  ctx.fillRect(-12 + 3, -20 + 4, 24, 40);
-
-  // Ruedas
-  ctx.fillStyle = "#11151b";
-  ctx.fillRect(-15, -15, 5, 11);
-  ctx.fillRect(10, -15, 5, 11);
-  ctx.fillRect(-15, 6, 5, 11);
-  ctx.fillRect(10, 6, 5, 11);
-
-  // Carrocería
+  drawGrass();
+  // Sombra exterior
   ctx.fillStyle = "#111820";
-  ctx.fillRect(-12, -21, 24, 42);
-  ctx.fillStyle = color;
-  ctx.fillRect(-10, -19, 20, 38);
-  ctx.fillRect(-7, -23, 14, 5);
-  ctx.fillRect(-7, 18, 14, 4);
-
-  // Parabrisas
-  ctx.fillStyle = "#a8efff";
-  ctx.fillRect(-7, -12, 14, 9);
-  ctx.fillRect(-6, -11, 5, 7);
-  ctx.fillRect(2, -11, 4, 7);
-
-  // Ventana trasera
-  ctx.fillStyle = "#243b4b";
-  ctx.fillRect(-6, 7, 12, 6);
-
-  // Luces
-  ctx.fillStyle = "#fff2b0";
-  ctx.fillRect(-9, -19, 5, 3);
-  ctx.fillRect(4, -19, 5, 3);
-  ctx.fillStyle = "#ff334f";
-  ctx.fillRect(-9, 16, 5, 3);
-  ctx.fillRect(4, 16, 5, 3);
-
-  // Franja central
-  ctx.fillStyle = isMe ? "#ffffff" : "#202c36";
-  ctx.fillRect(-2, -1, 4, 7);
-
+  ellipsePath(OUT_RX+7,OUT_RY+7); ctx.fill();
+  // Asfalto
+  ctx.fillStyle = "#555d67";
+  ellipsePath(OUT_RX,OUT_RY); ctx.fill();
+  // Rayas de borde
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = "#f4f1df";
+  ellipsePath(OUT_RX-3,OUT_RY-3); ctx.stroke();
+  ctx.strokeStyle = "#e74b51";
+  ctx.setLineDash([18,18]);
+  ellipsePath(OUT_RX-3,OUT_RY-3); ctx.stroke();
+  ctx.setLineDash([]);
+  // Interior de hierba
+  ctx.fillStyle = "#204b35";
+  ellipsePath(IN_RX,IN_RY); ctx.fill();
+  ctx.strokeStyle = "#f4f1df";
+  ctx.lineWidth = 6;
+  ellipsePath(IN_RX,IN_RY); ctx.stroke();
+  // Líneas discontinuas de la carretera
+  ctx.strokeStyle = "#d0d1c2";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([14,15]);
+  ellipsePath(ROAD_RX,ROAD_RY); ctx.stroke();
+  ctx.setLineDash([]);
+  // Línea de salida en la parte superior
+  const sx=CX, sy=CY-ROAD_RY;
+  const tile=10;
+  for (let row=0; row<4; row++) {
+    for (let col=-3; col<=3; col++) {
+      ctx.fillStyle=(row+col+20)%2===0?"#fff":"#151820";
+      ctx.fillRect(sx+col*tile,sy-20+row*tile,tile,tile);
+    }
+  }
+  // Decoración: conos alrededor del circuito
+  for (let i=0;i<36;i++) {
+    const a=(i/36)*Math.PI*2;
+    const x=CX+Math.cos(a)*(OUT_RX+17);
+    const y=CY+Math.sin(a)*(OUT_RY+17);
+    ctx.fillStyle="#ffb341";
+    ctx.fillRect(x-3,y-3,7,7);
+    ctx.fillStyle="#fff1c4";
+    ctx.fillRect(x-2,y-3,4,2);
+  }
+  // Centro del circuito
+  ctx.fillStyle="#183d2c";
+  ctx.font="bold 20px monospace";
+  ctx.textAlign="center";
+  ctx.fillText("PIXEL",CX,CY-8);
+  ctx.fillText("CIRCUIT",CX,CY+18);
+  ctx.fillStyle="#8dc9a0";
+  ctx.font="10px monospace";
+  ctx.fillText("ARCADE GRAND PRIX",CX,CY+39);
+}
+function drawCar(p) {
+  ctx.save();
+  ctx.translate(p.x,p.y);
+  ctx.rotate(p.angle || 0);
+  // Sombra
+  ctx.fillStyle="#0007";
+  ctx.fillRect(-10,-4,26,17);
+  // Ruedas
+  ctx.fillStyle="#15171b";
+  ctx.fillRect(-9,-12,8,7);
+  ctx.fillRect(6,-12,8,7);
+  ctx.fillRect(-9,7,8,7);
+  ctx.fillRect(6,7,8,7);
+  // Carrocería
+  ctx.fillStyle=p.color || "#ff4e45";
+  ctx.fillRect(-11,-13,23,28);
+  ctx.fillStyle="#ffffff";
+  ctx.fillRect(-7,-11,15,3);
+  // Parabrisas y techo
+  ctx.fillStyle="#a5eaff";
+  ctx.fillRect(-7,-5,15,8);
+  ctx.fillStyle="#27384a";
+  ctx.fillRect(-6,-4,13,6);
+  // Alerón
+  ctx.fillStyle="#202631";
+  ctx.fillRect(-12,10,25,4);
+  // Faros
+  ctx.fillStyle="#fff6b5";
+  ctx.fillRect(-9,-14,5,3);
+  ctx.fillRect(5,-14,5,3);
+  // Nombre del jugador
   ctx.restore();
-
-  // Nombre del piloto
-  ctx.font = "bold 14px monospace";
-  ctx.textAlign = "center";
-  ctx.fillStyle = "#101820";
-  ctx.fillText(player.name || "Piloto", x + 1, y - 27 + 1);
-  ctx.fillStyle = isMe ? "#fff16a" : "#ffffff";
-  ctx.fillText(player.name || "Piloto", x, y - 27);
+  ctx.save();
+  ctx.font="bold 10px monospace";
+  ctx.textAlign="center";
+  ctx.fillStyle="#000b";
+  ctx.fillText(p.name || "Piloto",p.x+1,p.y-22+1);
+  ctx.fillStyle=p.id===myId?"#ffffff":"#dce7ef";
+  ctx.fillText(p.name || "Piloto",p.x,p.y-22);
+  ctx.restore();
 }
-
-function drawPlayers() {
-  // Dibujamos primero los rivales y al final nuestro coche
-  for (const player of players) {
-    if (player.id !== myId) drawCar(player, false);
+function addParticles() {
+  if (!myPlayer || !(input.down || input.left || input.right) || (myPlayer.speed||0)<1.1) return;
+  if (Math.random()>.65) {
+    const a=myPlayer.angle||0;
+    particles.push({
+      x:myPlayer.x-Math.cos(a)*12+(Math.random()-.5)*8,
+      y:myPlayer.y-Math.sin(a)*12+(Math.random()-.5)*8,
+      life:1, size:2+Math.random()*3
+    });
   }
-
-  const me = players.find(p => p.id === myId);
-  if (me) drawCar(me, true);
 }
-
-// 5. CLASIFICACIÓN EN DIRECTO
-function updateLeaderboard(list) {
-  const sorted = [...list].sort((a, b) => {
-    const lapDifference = (b.lap || 0) - (a.lap || 0);
-    if (lapDifference !== 0) return lapDifference;
-    return (b.progress || 0) - (a.progress || 0);
+function drawParticles(dt) {
+  particles.forEach(p => {
+    p.life-=dt*1.5;
+    p.x+=Math.sin(p.x)*dt*8;
+    p.y+=dt*7;
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.fillStyle="#e4e4d4";
+    ctx.fillRect(p.x,p.y,p.size,p.size);
   });
-
-  leaderboard.replaceChildren();
-
-  if (!sorted.length) {
-    const li = document.createElement("li");
-    li.className = "empty-row";
-    li.textContent = "Esperando pilotos...";
-    leaderboard.appendChild(li);
-    return;
-  }
-
-  sorted.slice(0, 12).forEach((player, index) => {
-    const li = document.createElement("li");
-
-    const name = document.createElement("span");
-    name.className = "driver-name";
-    name.textContent = `${index + 1}. ${player.name || "Piloto"}`;
-
-    const score = document.createElement("span");
-    score.className = "driver-score";
-    score.textContent = `Vuelta ${player.lap || 0}`;
-
-    li.append(name, score);
-    leaderboard.appendChild(li);
-  });
-
-  const myPosition = sorted.findIndex(p => p.id === myId);
-  positionDisplay.textContent = myPosition >= 0 ? `${myPosition + 1}º` : "—";
-
-  const me = sorted.find(p => p.id === myId);
-  if (me) lapDisplay.textContent = `${me.lap || 0}/3`;
+  ctx.globalAlpha=1;
+  particles=particles.filter(p=>p.life>0);
 }
-
-// 6. CONEXIÓN MULTIJUGADOR
-function setConnection(isConnected, text) {
-  connected = isConnected;
-  statusText.textContent = text;
-  statusDot.classList.toggle("connected", isConnected);
-  statusDot.classList.toggle("disconnected", !isConnected);
-  joinButton.disabled = !isConnected;
-}
-
-function connectToServer() {
-  if (!window.io) {
-    setConnection(false, "Socket.IO no cargó");
-    message.textContent = "Comprueba tu conexión a internet y recarga la página.";
-    return;
-  }
-
-  if (SERVER_URL.includes("TU-SERVIDOR")) {
-    setConnection(false, "Servidor pendiente");
-    message.textContent =
-      "La pista está lista. Falta publicar el servidor multijugador y poner su URL aquí.";
-    draw();
-    return;
-  }
-
-  socket = io(SERVER_URL, {
-    transports: ["websocket", "polling"],
-    reconnection: true,
-    timeout: 10000
-  });
-
-  socket.on("connect", () => {
-    setConnection(true, "Servidor conectado");
-    message.textContent = "Conectado. ¡Escribe tu nombre y pulsa JUGAR!";
-  });
-
-  socket.on("disconnect", () => {
-    setConnection(false, "Reconectando...");
-    joined = false;
-    overlay.classList.remove("hidden");
-    message.textContent = "Se perdió la conexión con la carrera.";
-  });
-
-  socket.on("connect_error", () => {
-    setConnection(false, "Sin conexión");
-    message.textContent = "No se pudo conectar. El servidor podría estar iniciándose.";
-  });
-
-  // El servidor nos asigna nuestro identificador y estado inicial
-  socket.on("welcome", data => {
-    myId = data.id;
-  });
-
-  // El servidor envía el estado compartido de la carrera
-  socket.on("state", data => {
-    if (!data || !Array.isArray(data.players)) return;
-
-    players = data.players;
-    playerCount.textContent = players.length;
-    updateLeaderboard(players);
-    draw();
-  });
-
-  socket.on("raceMessage", text => {
-    raceMessage = String(text).slice(0, 100);
-    message.textContent = raceMessage;
-  });
-}
-
-joinButton.addEventListener("click", () => {
-  if (!connected || !socket) {
-    message.textContent = "Todavía no hay conexión con el servidor.";
-    return;
-  }
-
-  const name = nameInput.value.trim().slice(0, 16) || "Piloto";
-
-  socket.emit("joinRace", { name });
-  joined = true;
-  overlay.classList.add("hidden");
-  message.textContent = "¡Estás en la pista! Usa WASD o las flechas.";
-  nameInput.value = name;
-  nameInput.blur();
-});
-
-// 7. CONTROLES
-function setKey(key, pressed) {
-  keys[key] = pressed;
-}
-
-window.addEventListener("keydown", event => {
-  const key = event.key.toLowerCase();
-  const map = {
-    arrowup: "up", w: "up",
-    arrowdown: "down", s: "down",
-    arrowleft: "left", a: "left",
-    arrowright: "right", d: "right"
-  };
-
-  if (map[key]) {
-    event.preventDefault();
-    setKey(map[key], true);
-  }
-});
-
-window.addEventListener("keyup", event => {
-  const key = event.key.toLowerCase();
-  const map = {
-    arrowup: "up", w: "up",
-    arrowdown: "down", s: "down",
-    arrowleft: "left", a: "left",
-    arrowright: "right", d: "right"
-  };
-
-  if (map[key]) setKey(map[key], false);
-});
-
-window.addEventListener("blur", () => {
-  Object.keys(keys).forEach(key => keys[key] = false);
-});
-
-function bindHoldButton(id, key) {
-  const button = document.getElementById(id);
-
-  button.addEventListener("pointerdown", event => {
-    event.preventDefault();
-    button.setPointerCapture(event.pointerId);
-    setKey(key, true);
-  });
-
-  const release = () => setKey(key, false);
-  button.addEventListener("pointerup", release);
-  button.addEventListener("pointercancel", release);
-  button.addEventListener("lostpointercapture", release);
-}
-
-bindHoldButton("leftButton", "left");
-bindHoldButton("rightButton", "right");
-bindHoldButton("accelerateButton", "up");
-bindHoldButton("brakeButton", "down");
-
-// Enviamos los controles al servidor, que será quien valide y mueva a cada piloto.
-setInterval(() => {
-  if (!connected || !joined || !socket) return;
-
-  const now = performance.now();
-  if (now - lastSent < 40) return;
-  lastSent = now;
-
-  socket.emit("input", {
-    up: keys.up,
-    down: keys.down,
-    left: keys.left,
-    right: keys.right
-  });
-}, 40);
-
-// 8. DIBUJO Y ANIMACIÓN
-function draw() {
-  ctx.clearRect(0, 0, W, H);
+function render(now) {
+  const dt=Math.min(.05,(now-lastFrame)/1000);
+  lastFrame=now;
+  ctx.clearRect(0,0,W,H);
   drawTrack();
-  drawPlayers();
+  addParticles();
+  drawParticles(dt);
+  players.forEach(drawCar);
+  if (myPlayer && input.boost && (myPlayer.speed||0)>1) {
+    ctx.save();
+    ctx.globalAlpha=.8;
+    ctx.fillStyle="#ffe36e";
+    const a=myPlayer.angle||0;
+    for(let i=0;i<4;i++){
+      ctx.fillRect(myPlayer.x-Math.cos(a)*(15+i*5)-2,myPlayer.y-Math.sin(a)*(15+i*5)-2,4,4);
+    }
+    ctx.restore();
+  }
+  const elapsed = raceStart ? Math.max(0,(Date.now()-raceStart)/1000) : 0;
+  const mins=String(Math.floor(elapsed/60)).padStart(2,"0");
+  const secs=String(Math.floor(elapsed%60)).padStart(2,"0");
+  const tenths=Math.floor(elapsed%1*10);
+  $("timerDisplay").textContent=`${mins}:${secs}.${tenths}`;
+  requestAnimationFrame(render);
 }
-
-function idleAnimation() {
-  draw();
-  requestAnimationFrame(idleAnimation);
-}
-
-draw();
-idleAnimation();
-connectToServer();
+requestAnimationFrame(render);
