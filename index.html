@@ -1,107 +1,99 @@
-
+ 
 <!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#101820">
-  <title>Mini Racing | Pixel GP</title>
+  <meta name="theme-color" content="#10151e">
+  <title>Mini Racing Arcade</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script src="app.js" defer></script>
 </head>
 <body>
-  <header class="topbar">
-    <a class="logo" href="./">MINI<span>RACING</span></a>
-    <div class="online-status">
-      <span class="status-dot" id="statusDot"></span>
-      <span id="connectionStatus">Conectando...</span>
-    </div>
-  </header>
+  <main class="game-shell">
+    <header class="topbar">
+      <a class="brand" href="#"> <span class="brand-icon">🏎️</span> MINI RACING <span class="brand-highlight">ARCADE</span></a>
+      <div class="connection"><span id="connectionDot" class="dot"></span><span id="connectionText">Conectando...</span></div>
+    </header>
 
-  <main class="layout">
-    <section class="intro">
-      <p class="eyebrow">8-BIT MULTIPLAYER GRAND PRIX</p>
-      <h1>PISTA. GAS.<br><span>¡A CORRER!</span></h1>
-      <p class="description">
-        Súbete al coche, entra en la pista y compite contra otros pilotos.
-        ¡El primero en cruzar la meta se lleva la gloria!
-      </p>
-
-      <div class="player-form">
-        <label for="playerName">TU NOMBRE DE PILOTO</label>
-        <div class="name-row">
-          <input id="playerName" maxlength="16" value="Player 1"
-                 placeholder="Tu nombre" autocomplete="nickname">
-          <button id="joinButton" type="button">JUGAR</button>
+    <section class="game-layout">
+      <div class="race-column">
+        <div class="race-heading">
+          <div>
+            <p class="eyebrow">MULTIJUGADOR ONLINE</p>
+            <h1>Pixel Circuit <span class="live-tag">LIVE</span></h1>
+          </div>
+          <div class="race-badge"><span>🏁</span> <span id="raceStatus">ESPERANDO PILOTOS</span></div>
         </div>
-        <p class="hint" id="gameMessage">Conectando con el servidor...</p>
-      </div>
 
-      <div class="stats">
-        <div><strong id="playerCount">0</strong><span>PILOTOS ONLINE</span></div>
-        <div><strong id="lapDisplay">0/3</strong><span>TU VUELTA</span></div>
-        <div><strong id="positionDisplay">—</strong><span>POSICIÓN</span></div>
-      </div>
-    </section>
+        <div class="hud">
+          <div class="hud-item"><span>VUELTA</span><strong id="lapDisplay">— / 3</strong></div>
+          <div class="hud-item"><span>POSICIÓN</span><strong id="positionDisplay">—</strong></div>
+          <div class="hud-item"><span>TIEMPO</span><strong id="timerDisplay">00:00.0</strong></div>
+          <div class="hud-item speed-box"><span>VELOCIDAD</span><strong><span id="speedDisplay">0</span><small> KM/H</small></strong></div>
+        </div>
 
-    <section class="game-panel">
-      <div class="panel-heading">
-        <span><i></i> PIXEL CIRCUIT</span>
-        <span class="race-label">MODO MULTIJUGADOR</span>
-      </div>
+        <div class="canvas-wrap">
+          <canvas id="gameCanvas" width="960" height="640" aria-label="Circuito de carreras"></canvas>
+          <div id="overlay" class="overlay">
+            <div class="overlay-card">
+              <div class="overlay-icon">🏁</div>
+              <p class="eyebrow">LISTO PARA CORRER</p>
+              <h2 id="overlayTitle">¡A la parrilla!</h2>
+              <p id="overlayText">Entra en la carrera y compite contra tus amigos.</p>
+              <input id="playerName" maxlength="16" autocomplete="nickname" placeholder="Tu nombre de piloto" value="">
+              <button id="joinButton" class="primary-button">ENTRAR EN CARRERA <span>→</span></button>
+              <p class="fine-print">No cierres esta pestaña durante la carrera.</p>
+            </div>
+          </div>
+          <div id="countdown" class="countdown hidden">3</div>
+          <div id="toast" class="toast hidden"></div>
+        </div>
 
-      <div class="canvas-wrap">
-        <canvas id="gameCanvas" width="960" height="640"
-                aria-label="Circuito de carreras visto desde arriba"></canvas>
-        <div class="game-overlay" id="gameOverlay">
-          <div class="overlay-card">
-            <div class="flag">🏁</div>
-            <h2>¿LISTO, PILOTO?</h2>
-            <p>Escribe tu nombre y pulsa JUGAR para entrar en la carrera.</p>
-            <p class="small">WASD o flechas para conducir</p>
+        <div class="mobile-controls">
+          <div class="steering-controls">
+            <button class="control-button" data-control="left" aria-label="Girar a la izquierda">◀</button>
+            <button class="control-button" data-control="right" aria-label="Girar a la derecha">▶</button>
+          </div>
+          <div class="driving-controls">
+            <button class="control-button brake-button" data-control="down">FRENO</button>
+            <button class="control-button boost-button" data-control="boost">⚡ TURBO</button>
+            <button class="control-button accelerate-button" data-control="up">GAS ▲</button>
           </div>
         </div>
-      </div>
 
-      <div class="controls-info">
-        <div class="key-group">
-          <span class="key">W</span>
-          <span class="key-row">
-            <span class="key">A</span><span class="key">S</span><span class="key">D</span>
-          </span>
+        <div class="controls-hint">
+          <span><kbd>W</kbd><kbd>↑</kbd> Acelerar</span>
+          <span><kbd>S</kbd><kbd>↓</kbd> Frenar</span>
+          <span><kbd>A</kbd><kbd>D</kbd> Girar</span>
+          <span><kbd>ESPACIO</kbd> Turbo</span>
         </div>
-        <span>O USA LAS FLECHAS DEL TECLADO</span>
-        <span class="pixel-badge">60 FPS STYLE</span>
       </div>
 
-      <div class="mobile-controls">
-        <button id="leftButton" aria-label="Girar a la izquierda">◀</button>
-        <button id="accelerateButton" aria-label="Acelerar">▲</button>
-        <button id="brakeButton" aria-label="Frenar">▼</button>
-        <button id="rightButton" aria-label="Girar a la derecha">▶</button>
-      </div>
+      <aside class="sidebar">
+        <section class="side-panel">
+          <div class="panel-heading"><h2>CLASIFICACIÓN</h2><span class="panel-icon">🏆</span></div>
+          <div class="player-count"><span class="dot green-dot"></span><span id="playerCount">0 pilotos conectados</span></div>
+          <ol id="leaderboard" class="leaderboard">
+            <li class="empty-leaderboard">Esperando pilotos...</li>
+          </ol>
+        </section>
+        <section class="side-panel race-info">
+          <div class="panel-heading"><h2>DATOS DE CARRERA</h2><span class="panel-icon">📡</span></div>
+          <div class="info-row"><span>Circuito</span><strong>Pixel Circuit</strong></div>
+          <div class="info-row"><span>Vueltas</span><strong>3</strong></div>
+          <div class="info-row"><span>Modo</span><strong>En línea</strong></div>
+          <div class="info-row"><span>Turbo</span><strong class="turbo-text">Disponible ⚡</strong></div>
+        </section>
+        <section class="tip-panel">
+          <span class="tip-icon">💡</span>
+          <div><strong>CONSEJO DEL PILOTO</strong><p>Frena antes de las curvas y usa el turbo en las rectas. ¡No te salgas del asfalto!</p></div>
+        </section>
+        <button id="rejoinButton" class="secondary-button">VOLVER A ENTRAR</button>
+      </aside>
     </section>
-
-    <aside class="leaderboard">
-      <div class="panel-heading">
-        <span>🏆 CLASIFICACIÓN</span>
-        <span class="race-label">EN DIRECTO</span>
-      </div>
-      <ol id="leaderboardList">
-        <li class="empty-row">Esperando pilotos...</li>
-      </ol>
-      <div class="leaderboard-footer">
-        <span class="status-dot"></span>
-        <span>Los pilotos se actualizan en tiempo real</span>
-      </div>
-    </aside>
+    <footer>MINI RACING ARCADE <span>•</span> HECHO PARA COMPETIR</footer>
   </main>
-
-  <footer>
-    MINI RACING © <span id="year"></span> · PIXEL ART RACING
-  </footer>
-
-  <!-- Socket.IO conecta esta web con el servidor multijugador -->
-  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
-  <script src="app.js"></script>
 </body>
 </html>
