@@ -3,7 +3,7 @@
 
 // 1. CONFIGURACIÓN
 // Pondremos aquí la URL real del servidor cuando lo publiquemos.
-const SERVER_URL = "https://TU-SERVIDOR.onrender.com";
+const SERVER_URL = "https://mini-racing-server-fa83.onrender.com";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
