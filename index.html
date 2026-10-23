@@ -1,0 +1,107 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#101820">
+  <title>Mini Racing | Pixel GP</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="logo" href="./">MINI<span>RACING</span></a>
+    <div class="online-status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="connectionStatus">Conectando...</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="intro">
+      <p class="eyebrow">8-BIT MULTIPLAYER GRAND PRIX</p>
+      <h1>PISTA. GAS.<br><span>¡A CORRER!</span></h1>
+      <p class="description">
+        Súbete al coche, entra en la pista y compite contra otros pilotos.
+        ¡El primero en cruzar la meta se lleva la gloria!
+      </p>
+
+      <div class="player-form">
+        <label for="playerName">TU NOMBRE DE PILOTO</label>
+        <div class="name-row">
+          <input id="playerName" maxlength="16" value="Player 1"
+                 placeholder="Tu nombre" autocomplete="nickname">
+          <button id="joinButton" type="button">JUGAR</button>
+        </div>
+        <p class="hint" id="gameMessage">Conectando con el servidor...</p>
+      </div>
+
+      <div class="stats">
+        <div><strong id="playerCount">0</strong><span>PILOTOS ONLINE</span></div>
+        <div><strong id="lapDisplay">0/3</strong><span>TU VUELTA</span></div>
+        <div><strong id="positionDisplay">—</strong><span>POSICIÓN</span></div>
+      </div>
+    </section>
+
+    <section class="game-panel">
+      <div class="panel-heading">
+        <span><i></i> PIXEL CIRCUIT</span>
+        <span class="race-label">MODO MULTIJUGADOR</span>
+      </div>
+
+      <div class="canvas-wrap">
+        <canvas id="gameCanvas" width="960" height="640"
+                aria-label="Circuito de carreras visto desde arriba"></canvas>
+        <div class="game-overlay" id="gameOverlay">
+          <div class="overlay-card">
+            <div class="flag">🏁</div>
+            <h2>¿LISTO, PILOTO?</h2>
+            <p>Escribe tu nombre y pulsa JUGAR para entrar en la carrera.</p>
+            <p class="small">WASD o flechas para conducir</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls-info">
+        <div class="key-group">
+          <span class="key">W</span>
+          <span class="key-row">
+            <span class="key">A</span><span class="key">S</span><span class="key">D</span>
+          </span>
+        </div>
+        <span>O USA LAS FLECHAS DEL TECLADO</span>
+        <span class="pixel-badge">60 FPS STYLE</span>
+      </div>
+
+      <div class="mobile-controls">
+        <button id="leftButton" aria-label="Girar a la izquierda">◀</button>
+        <button id="accelerateButton" aria-label="Acelerar">▲</button>
+        <button id="brakeButton" aria-label="Frenar">▼</button>
+        <button id="rightButton" aria-label="Girar a la derecha">▶</button>
+      </div>
+    </section>
+
+    <aside class="leaderboard">
+      <div class="panel-heading">
+        <span>🏆 CLASIFICACIÓN</span>
+        <span class="race-label">EN DIRECTO</span>
+      </div>
+      <ol id="leaderboardList">
+        <li class="empty-row">Esperando pilotos...</li>
+      </ol>
+      <div class="leaderboard-footer">
+        <span class="status-dot"></span>
+        <span>Los pilotos se actualizan en tiempo real</span>
+      </div>
+    </aside>
+  </main>
+
+  <footer>
+    MINI RACING © <span id="year"></span> · PIXEL ART RACING
+  </footer>
+
+  <!-- Socket.IO conecta esta web con el servidor multijugador -->
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
